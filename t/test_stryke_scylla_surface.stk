@@ -1,0 +1,49 @@
+## t/test_stryke_scylla_surface.stk — wrapper-completeness + pure-helper pin.
+##
+## Asserts every public `fn Scylla::name` in lib/Scylla.stk resolves at
+## runtime, then exercises the connection-free helpers. Permission-free — no
+## cluster, no creds. Private helpers (`_` prefix) are not asserted.
+
+use Scylla
+
+# ── wrapper surface ────────────────────────────────────────
+assert_ok exists &Scylla::version, "Scylla::version exists"
+assert_ok exists &Scylla::ping, "Scylla::ping exists"
+assert_ok exists &Scylla::server_version, "Scylla::server_version exists"
+assert_ok exists &Scylla::query, "Scylla::query exists"
+assert_ok exists &Scylla::query_row, "Scylla::query_row exists"
+assert_ok exists &Scylla::query_value, "Scylla::query_value exists"
+assert_ok exists &Scylla::execute, "Scylla::execute exists"
+assert_ok exists &Scylla::keyspaces, "Scylla::keyspaces exists"
+assert_ok exists &Scylla::tables, "Scylla::tables exists"
+assert_ok exists &Scylla::columns, "Scylla::columns exists"
+assert_ok exists &Scylla::count, "Scylla::count exists"
+assert_ok exists &Scylla::create_keyspace, "Scylla::create_keyspace exists"
+assert_ok exists &Scylla::drop_keyspace, "Scylla::drop_keyspace exists"
+assert_ok exists &Scylla::create_table, "Scylla::create_table exists"
+assert_ok exists &Scylla::drop_table, "Scylla::drop_table exists"
+assert_ok exists &Scylla::truncate, "Scylla::truncate exists"
+assert_ok exists &Scylla::raw, "Scylla::raw exists"
+assert_ok exists &Scylla::escape, "Scylla::escape exists"
+assert_ok exists &Scylla::quote_ident, "Scylla::quote_ident exists"
+assert_ok exists &Scylla::contact_points, "Scylla::contact_points exists"
+
+# ── version (cdylib loaded) ────────────────────────────────
+assert_ok Scylla::version(), "Scylla::version returns truthy (cdylib loaded)"
+
+# ── pure helpers (no cluster) ──────────────────────────────
+assert_eq Scylla::escape("O'Brien"), "O''Brien", "escape doubles single quote"
+assert_eq Scylla::escape("plain"), "plain", "escape leaves plain text"
+assert_eq Scylla::quote_ident("Col"), "\"Col\"", "quote_ident double-quotes"
+
+val @cp = Scylla::contact_points(node => "db", port => 9042)
+assert_eq $cp[0], "db:9042", "contact_points host:port"
+
+val @cp2 = Scylla::contact_points(nodes => ["a", "b:9100"])
+assert_eq $cp2[0], "a:9042", "contact_points normalizes default port"
+assert_eq $cp2[1], "b:9100", "contact_points keeps explicit port"
+
+val @cp3 = Scylla::contact_points()
+assert_eq $cp3[0], "127.0.0.1:9042", "contact_points default localhost"
+
+test_run

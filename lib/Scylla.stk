@@ -1,0 +1,175 @@
+## lib/Scylla.stk — ScyllaDB / Cassandra client for stryke (`use Scylla`).
+##
+## Thin wrapper around the `stryke-scylla` cdylib's `scylla__*` exports. The
+## cdylib is dlopened in-process on first `use Scylla` and registers each
+## export via `rust_ffi::load_cdylib`. Every wrapper builds a JSON args dict,
+## calls the FFI symbol, and parses the JSON return.
+##
+## Transport is the CQL binary protocol via ScyllaDB's pure-Rust driver, run on
+## an embedded tokio runtime inside the cdylib; a `Session` is cached per
+## `(nodes, auth, keyspace)`. Queries are unparameterized CQL — interpolate
+## untrusted values through `Scylla::escape` (CQL doubles the single quote).
+
+package Scylla
+
+# ── error dispatch ────────────────────────────────────────────────────
+
+## Decode a `scylla__*` JSON return; die on a reported error.
+fn Scylla::_decode ($name, $json) {
+    val $o = from_json $json
+    if (ref $o eq "HASH" && exists $o->{error}) {
+        die "Scylla::$name: $o->{error}"
+    }
+    $o
+}
+
+## Build the request hash: connection params from %opts plus per-op fields.
+## Falls back to $SCYLLA_NODES (comma-separated) when no node is given.
+fn Scylla::_req ($extra, $opts) {
+    var %r = %$extra
+    for val $k (qw(nodes node host port username password keyspace)) {
+        $r{$k} = $opts->{$k} if exists $opts->{$k} && defined $opts->{$k}
+    }
+    if (!exists $r{nodes} && !exists $r{node} && !exists $r{host} && defined $ENV{SCYLLA_NODES}) {
+        $r{nodes} = [split(/,/, $ENV{SCYLLA_NODES})]
+    }
+    \%r
+}
+
+# ── version + liveness ────────────────────────────────────────────────
+
+## Package version string.
+fn Scylla::version {
+    Scylla::_decode("version", scylla__version("{}"))->{version}
+}
+
+## Connectivity probe — 1 when the cluster answers, 0 otherwise.
+fn Scylla::ping (%opts) {
+    val $r = Scylla::_req({}, \%opts)
+    Scylla::_decode("ping", scylla__ping(to_json($r)))->{value}
+}
+
+## Cluster release version (`system.local`).
+fn Scylla::server_version (%opts) {
+    val $r = Scylla::_req({}, \%opts)
+    Scylla::_decode("server_version", scylla__server_version(to_json($r)))->{value}
+}
+
+# ── query ─────────────────────────────────────────────────────────────
+
+## Run a SELECT; returns the array of row objects.
+fn Scylla::query ($cql, %opts) {
+    val $r = Scylla::_req({ cql => $cql }, \%opts)
+    @{ Scylla::_decode("query", scylla__query(to_json($r)))->{value} }
+}
+
+## Run a SELECT; returns the first row object (or undef).
+fn Scylla::query_row ($cql, %opts) {
+    val $r = Scylla::_req({ cql => $cql }, \%opts)
+    Scylla::_decode("query_row", scylla__query_row(to_json($r)))->{value}
+}
+
+## Run a SELECT; returns the first column of the first row (a scalar).
+fn Scylla::query_value ($cql, %opts) {
+    val $r = Scylla::_req({ cql => $cql }, \%opts)
+    Scylla::_decode("query_value", scylla__query_value(to_json($r)))->{value}
+}
+
+## Run a statement that returns no rows (INSERT/UPDATE/DELETE/DDL).
+fn Scylla::execute ($cql, %opts) {
+    val $r = Scylla::_req({ cql => $cql }, \%opts)
+    Scylla::_decode("execute", scylla__execute(to_json($r)))->{ok}
+}
+
+# ── schema introspection ──────────────────────────────────────────────
+
+## Array of keyspace names.
+fn Scylla::keyspaces (%opts) {
+    val $r = Scylla::_req({}, \%opts)
+    @{ Scylla::_decode("keyspaces", scylla__keyspaces(to_json($r)))->{value} }
+}
+
+## Array of table names in $keyspace.
+fn Scylla::tables ($keyspace, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace }, \%opts)
+    @{ Scylla::_decode("tables", scylla__tables(to_json($r)))->{value} }
+}
+
+## Column descriptors for $keyspace.$table.
+fn Scylla::columns ($keyspace, $table, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace, table => $table }, \%opts)
+    @{ Scylla::_decode("columns", scylla__columns(to_json($r)))->{value} }
+}
+
+## Row count of $table (full-table scan — use sparingly on large tables).
+fn Scylla::count ($table, %opts) {
+    val $r = Scylla::_req({ table => $table }, \%opts)
+    Scylla::_decode("count", scylla__count(to_json($r)))->{value}
+}
+
+# ── DDL helpers ───────────────────────────────────────────────────────
+
+## CREATE KEYSPACE IF NOT EXISTS $name. %opts{replication} is the CQL
+## replication map (default SimpleStrategy RF 1).
+fn Scylla::create_keyspace ($name, %opts) {
+    val $r = Scylla::_req({ name => $name, replication => $opts{replication} }, \%opts)
+    Scylla::_decode("create_keyspace", scylla__create_keyspace(to_json($r)))->{ok}
+}
+
+## DROP KEYSPACE IF EXISTS $name.
+fn Scylla::drop_keyspace ($name, %opts) {
+    val $r = Scylla::_req({ name => $name }, \%opts)
+    Scylla::_decode("drop_keyspace", scylla__drop_keyspace(to_json($r)))->{ok}
+}
+
+## Create a table. Either %opts{cql} (full CREATE) or $name + %opts{columns}
+## ("col type, …") + %opts{primary_key}.
+fn Scylla::create_table ($name, %opts) {
+    val $r = Scylla::_req(
+        {
+            name        => $name,
+            cql         => $opts{cql},
+            columns     => $opts{columns},
+            primary_key => $opts{primary_key},
+        },
+        \%opts
+    )
+    Scylla::_decode("create_table", scylla__create_table(to_json($r)))->{ok}
+}
+
+## DROP TABLE IF EXISTS $table.
+fn Scylla::drop_table ($table, %opts) {
+    val $r = Scylla::_req({ table => $table }, \%opts)
+    Scylla::_decode("drop_table", scylla__drop_table(to_json($r)))->{ok}
+}
+
+## TRUNCATE $table.
+fn Scylla::truncate ($table, %opts) {
+    val $r = Scylla::_req({ table => $table }, \%opts)
+    Scylla::_decode("truncate", scylla__truncate(to_json($r)))->{ok}
+}
+
+## Escape hatch: run arbitrary $cql. %opts{rows} (default true) returns the
+## row array; pass rows => 0 for a no-row statement.
+fn Scylla::raw ($cql, %opts) {
+    val $r = Scylla::_req({ cql => $cql, rows => ($opts{rows} // \1) }, \%opts)
+    Scylla::_decode("raw", scylla__raw(to_json($r)))
+}
+
+# ── pure helpers (no connection) ──────────────────────────────────────
+
+## Escape $value for a single-quoted CQL literal (doubles `'`).
+fn Scylla::escape ($value) {
+    Scylla::_decode("escape", scylla__escape_string(to_json({ value => $value })))->{value}
+}
+
+## Double-quote $value as a case-sensitive CQL identifier.
+fn Scylla::quote_ident ($value) {
+    Scylla::_decode("quote_identifier", scylla__quote_identifier(to_json({ value => $value })))->{value}
+}
+
+## Normalize the contact points these opts resolve to (each "host:port").
+fn Scylla::contact_points (%opts) {
+    val $r = Scylla::_req({}, \%opts)
+    @{ Scylla::_decode("contact_points", scylla__contact_points(to_json($r)))->{value} }
+}

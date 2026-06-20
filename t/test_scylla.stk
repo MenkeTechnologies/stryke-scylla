@@ -1,0 +1,63 @@
+## t/test_scylla.stk — assertion tests for the stryke `Scylla` package.
+##
+## Needs the cdylib loaded (`s pkg install -g .`) so `use Scylla` dlopens
+## `lib/libstryke_scylla.{dylib,so}`. The data-side asserts also need a live
+## ScyllaDB / Cassandra at `$SCYLLA_NODES` (or `127.0.0.1:9042`); they
+## short-circuit when ping fails so CI without a cluster exits clean on the
+## connection-free asserts.
+
+use Scylla
+
+# ── permission-free: cdylib reachable ───────────────────────────────
+assert_ok Scylla::version(), "Scylla::version returns truthy (cdylib loaded)"
+assert_eq Scylla::escape("a'b"), "a''b", "escape builder"
+
+# ── liveness probe ──────────────────────────────────────────────────
+var %conn
+$conn{nodes} = [split(/,/, $ENV{SCYLLA_NODES})] if defined $ENV{SCYLLA_NODES}
+val $alive = eval { Scylla::ping(%conn) }
+
+if ($alive) {
+    val $ks = "stryke_test_$$"
+
+    # 1. create keyspace + table
+    Scylla::create_keyspace($ks, %conn)
+    assert_ok grep { $_ eq $ks } Scylla::keyspaces(%conn), "keyspace created"
+
+    Scylla::create_table(
+        "$ks.users",
+        columns     => "id int, name text",
+        primary_key => "id",
+        %conn,
+    )
+    assert_ok grep { $_ eq "users" } Scylla::tables($ks, %conn), "table created"
+
+    # 2. insert rows
+    Scylla::execute("INSERT INTO $ks.users (id, name) VALUES (1, 'alpha')", %conn)
+    Scylla::execute("INSERT INTO $ks.users (id, name) VALUES (2, 'beta')", %conn)
+
+    # 3. count
+    assert_eq Scylla::count("$ks.users", %conn), 2, "count is 2"
+
+    # 4. query rows
+    val @rows = Scylla::query("SELECT id, name FROM $ks.users", %conn)
+    assert_eq scalar(@rows), 2, "query returns 2 rows"
+
+    # 5. query_value scalar
+    val $name = Scylla::query_value("SELECT name FROM $ks.users WHERE id = 1", %conn)
+    assert_eq $name, "alpha", "query_value by primary key"
+
+    # 6. query_row
+    val $row = Scylla::query_row("SELECT id, name FROM $ks.users WHERE id = 2", %conn)
+    assert_eq $row->{name}, "beta", "query_row by primary key"
+
+    # 7. columns introspection
+    val @cols = Scylla::columns($ks, "users", %conn)
+    assert_ok scalar(@cols) >= 2, "columns lists at least 2 columns"
+
+    # cleanup
+    Scylla::drop_keyspace($ks, %conn)
+    assert_ok !(grep { $_ eq $ks } Scylla::keyspaces(%conn)), "keyspace dropped"
+}
+
+test_run

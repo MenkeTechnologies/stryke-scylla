@@ -1,0 +1,41 @@
+[package]
+name = "stryke-scylla"
+version = "0.1.0"
+description = "ScyllaDB / Cassandra client for stryke. cdylib loaded in-process — CQL via the pure-Rust scylla driver on an embedded tokio runtime; Session cached per (nodes, auth, keyspace)."
+authors = ["MenkeTechnologies"]
+license = "MIT"
+repository = "https://github.com/MenkeTechnologies/stryke-scylla"
+edition = "2026"
+
+[ffi]
+lib-name = "stryke_scylla"
+namespace = "Scylla"
+exports = [
+    "scylla__version",
+    "scylla__ping",
+    "scylla__server_version",
+    "scylla__query",
+    "scylla__query_row",
+    "scylla__query_value",
+    "scylla__execute",
+    "scylla__keyspaces",
+    "scylla__tables",
+    "scylla__columns",
+    "scylla__count",
+    "scylla__create_keyspace",
+    "scylla__drop_keyspace",
+    "scylla__create_table",
+    "scylla__drop_table",
+    "scylla__truncate",
+    "scylla__raw",
+    "scylla__escape_string",
+    "scylla__quote_identifier",
+    "scylla__contact_points",
+]
+
+[scripts]
+build = "cargo build --release"
+build-debug = "cargo build"
+clean = "cargo clean"
+test = "s test t/"
+install = "s pkg install -g ."

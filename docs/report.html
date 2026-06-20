@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="stryke-scylla engineering report — CQL binary protocol via the pure-Rust scylla driver, embedded tokio runtime, Session cache, CqlValue-to-JSON, JSON-in/JSON-out FFI.">
+  <title>stryke-scylla — Engineering report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 68rem; }
+  </style>
+</head>
+<body>
+  <div class="tutorial-wrap">
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <h1 class="tutorial-brand">// STRYKE-SCYLLA &mdash; ENGINEERING REPORT</h1>
+        <nav class="tutorial-nav">
+          <a href="index.html">Documentation</a>
+          <a href="https://github.com/MenkeTechnologies/stryke-scylla" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="tutorial-main">
+      <section>
+        <h2>Transport</h2>
+        <p>
+          The client speaks the CQL binary protocol via ScyllaDB's official
+          pure-Rust driver (the <code>scylla</code> crate), which also targets
+          Apache Cassandra. The driver manages a per-node connection pool and
+          token-aware routing internally.
+        </p>
+      </section>
+
+      <section>
+        <h2>Sync over async</h2>
+        <p>
+          The driver is async. Rather than expose futures across the FFI
+          boundary, the cdylib owns a single embedded tokio runtime
+          (<code>OnceCell&lt;Runtime&gt;</code>) and <code>block_on</code>s every
+          driver call, so the stryke-facing API stays synchronous like the other
+          connectors. A <code>Session</code> is cached per
+          <code>(nodes, auth, keyspace)</code> in a
+          <code>OnceCell&lt;Mutex&lt;HashMap&gt;&gt;</code>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Rows to JSON</h2>
+        <p>
+          Result rows are read generically: each <code>CqlValue</code> maps to
+          its natural JSON form — integers, text, booleans, and
+          lists/sets/maps — with a debug-string fallback for exotic types so the
+          converter never fails. Rows come back as objects keyed by column name,
+          taken from the result's column specs.
+        </p>
+      </section>
+
+      <section>
+        <h2>FFI contract + safety</h2>
+        <p>
+          Each <code>#[no_mangle] extern "C" fn scylla__*</code> is a
+          JSON-string-in / JSON-string-out wrapper; handlers run inside
+          <code>catch_unwind</code> so a panic becomes an
+          <code>{ "error": … }</code> result. Queries are unparameterized CQL —
+          interpolate untrusted values through <code>escape</code>, which doubles
+          the single quote per the CQL grammar. The escaping and contact-point
+          helpers are unit-tested in-crate and validate in CI with no cluster.
+        </p>
+      </section>
+    </main>
+
+    <footer class="tutorial-footer">
+      <p>MIT &middot; MenkeTechnologies</p>
+    </footer>
+  </div>
+  <script src="hud-theme.js"></script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="stryke-scylla — ScyllaDB / Cassandra client for stryke. CQL query, DDL, schema introspection over the native binary protocol. Opt-in package — a Rust cdylib dlopened in-process on first `use Scylla`.">
+  <title>stryke-scylla — Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="hud-static.css">
+  <link rel="stylesheet" href="tutorial.css">
+  <style>
+    .tutorial-main { max-width: 68rem; }
+    .example-tbl { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 12.5px; }
+    .example-tbl td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .example-tbl td:first-child { white-space: nowrap; color: var(--accent); font-family: 'Share Tech Mono', ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <div class="tutorial-wrap">
+    <header class="tutorial-header">
+      <div class="tutorial-header-inner">
+        <h1 class="tutorial-brand">// STRYKE-SCYLLA &mdash; SCYLLADB / CASSANDRA CLIENT FOR STRYKE</h1>
+        <nav class="tutorial-nav">
+          <a href="report.html">Engineering report</a>
+          <a href="https://github.com/MenkeTechnologies/stryke-scylla" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">strykelang</a>
+          <a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">Meta</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="tutorial-main">
+      <section>
+        <h2>What it is</h2>
+        <p>
+          <code>stryke-scylla</code> is a ScyllaDB / Apache Cassandra client for
+          <a href="https://github.com/MenkeTechnologies/strykelang" target="_blank" rel="noopener noreferrer">stryke</a>.
+          It speaks the native CQL binary protocol via ScyllaDB's official
+          pure-Rust driver and ships as a <code>cdylib</code> dlopened in-process
+          on the first <code>use Scylla</code>. The driver is async; the cdylib
+          owns one embedded tokio runtime and blocks on each call, so the
+          stryke-facing API is synchronous. A <code>Session</code> is cached per
+          <code>(nodes, auth, keyspace)</code>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Install</h2>
+        <pre><code>s add github.com/MenkeTechnologies/stryke-scylla</code></pre>
+      </section>
+
+      <section>
+        <h2>Quick start</h2>
+        <pre><code>use Scylla
+
+var %conn
+$conn{node}     = "127.0.0.1:9042"
+$conn{keyspace} = "app"
+
+Scylla::create_keyspace("app", %conn)
+Scylla::create_table("app.users", columns =&gt; "id uuid, name text", primary_key =&gt; "id", %conn)
+Scylla::execute("INSERT INTO app.users (id, name) VALUES (uuid(), 'ada')", %conn)
+
+p Scylla::count("app.users", %conn)
+val @rows = Scylla::query("SELECT name FROM app.users", %conn)</code></pre>
+      </section>
+
+      <section>
+        <h2>API surface</h2>
+        <table class="example-tbl">
+          <tr><td>Liveness</td><td>version, ping, server_version</td></tr>
+          <tr><td>Query</td><td>query, query_row, query_value, execute, raw</td></tr>
+          <tr><td>Introspection</td><td>keyspaces, tables, columns, count</td></tr>
+          <tr><td>DDL</td><td>create_keyspace, drop_keyspace, create_table, drop_table, truncate</td></tr>
+          <tr><td>Pure helpers</td><td>escape, quote_ident, contact_points</td></tr>
+        </table>
+        <p>Full reference in the <a href="https://github.com/MenkeTechnologies/stryke-scylla#readme">README</a>.</p>
+      </section>
+
+      <section>
+        <h2>Package family</h2>
+        <p>Part of the stryke connector family under the <a href="https://github.com/MenkeTechnologies/MenkeTechnologiesMeta" target="_blank" rel="noopener noreferrer">MenkeTechnologiesMeta</a> umbrella:</p>
+        <ul>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-clickhouse" target="_blank" rel="noopener noreferrer">stryke-clickhouse</a> — ClickHouse OLAP</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-mongo" target="_blank" rel="noopener noreferrer">stryke-mongo</a> — MongoDB</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-redis" target="_blank" rel="noopener noreferrer">stryke-redis</a> — Redis / Valkey</li>
+          <li><a href="https://github.com/MenkeTechnologies/stryke-search" target="_blank" rel="noopener noreferrer">stryke-search</a> — Elasticsearch / OpenSearch</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="tutorial-footer">
+      <p>MIT &middot; MenkeTechnologies</p>
+    </footer>
+  </div>
+  <script src="hud-theme.js"></script>
+</body>
+</html>
