@@ -36,6 +36,15 @@ exports = [
     "scylla__format_value",
     "scylla__format_in_list",
     "scylla__valid_identifier",
+    "scylla__cluster_name",
+    "scylla__clustering_keys",
+    "scylla__create_index",
+    "scylla__drop_index",
+    "scylla__indexes",
+    "scylla__partition_keys",
+    "scylla__peers",
+    "scylla__types",
+    "scylla__views",
 ]
 
 [scripts]
