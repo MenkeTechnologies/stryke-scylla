@@ -231,6 +231,50 @@ fn rows_of(result: &Value) -> Value {
     result.get("rows").cloned().unwrap_or(json!([]))
 }
 
+/// Pluck one named column from every row of a `run_cql` result into an array.
+fn pluck_column(result: &Value, col: &str) -> Vec<Value> {
+    rows_of(result)
+        .as_array()
+        .map(|a| a.iter().filter_map(|row| row.get(col).cloned()).collect())
+        .unwrap_or_default()
+}
+
+/// Column names of one `kind` (`partition_key` / `clustering`) for the table in
+/// `opts`, ordered by their `position` in `system_schema.columns`.
+fn key_columns(opts: &Value, kind: &str) -> Result<Vec<Value>> {
+    let ks = opt_str(opts, "keyspace").ok_or_else(|| anyhow!("missing keyspace"))?;
+    let table = str_field(opts, "table")?;
+    let cql = format!(
+        "SELECT column_name, position FROM system_schema.columns \
+         WHERE keyspace_name = '{}' AND table_name = '{}' AND kind = '{}' ALLOW FILTERING",
+        escape_string(ks),
+        escape_string(table),
+        escape_string(kind)
+    );
+    let r = run_cql(opts, &cql)?;
+    Ok(sort_columns_by_position(&rows_of(&r)))
+}
+
+/// Order `column_name`s by their `position` field (ascending). Used to render a
+/// table's partition/clustering keys in their declared key order, since
+/// `system_schema.columns` returns them unordered.
+fn sort_columns_by_position(rows: &Value) -> Vec<Value> {
+    let mut pairs: Vec<(i64, Value)> = rows
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|row| {
+                    let name = row.get("column_name")?.clone();
+                    let pos = row.get("position").and_then(|p| p.as_i64()).unwrap_or(0);
+                    Some((pos, name))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    pairs.sort_by_key(|(pos, _)| *pos);
+    pairs.into_iter().map(|(_, name)| name).collect()
+}
+
 // ── FFI plumbing ────────────────────────────────────────────────────────────
 
 fn ffi_call<F>(args: *const c_char, handler: F) -> *const c_char
@@ -296,6 +340,30 @@ pub extern "C" fn scylla__server_version(args: *const c_char) -> *const c_char {
             .cloned()
             .unwrap_or(Value::Null);
         Ok(json!({ "value": ver }))
+    })
+}
+
+/// Cluster name as configured on the coordinator (`system.local`).
+#[no_mangle]
+pub extern "C" fn scylla__cluster_name(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let r = run_cql(&v, "SELECT cluster_name FROM system.local")?;
+        let name = rows_of(&r)
+            .get(0)
+            .and_then(|row| row.get("cluster_name"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        Ok(json!({ "value": name }))
+    })
+}
+
+/// Peer node addresses known to the coordinator (`system.peers`). Returns the
+/// `peer` column of every row — the broadcast addresses of the other nodes.
+#[no_mangle]
+pub extern "C" fn scylla__peers(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let r = run_cql(&v, "SELECT peer FROM system.peers")?;
+        Ok(json!({ "value": pluck_column(&r, "peer") }))
     })
 }
 
@@ -376,15 +444,7 @@ pub extern "C" fn scylla__batch(args: *const c_char) -> *const c_char {
 pub extern "C" fn scylla__keyspaces(args: *const c_char) -> *const c_char {
     ffi_call(args, |v| {
         let r = run_cql(&v, "SELECT keyspace_name FROM system_schema.keyspaces")?;
-        let names: Vec<Value> = rows_of(&r)
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|row| row.get("keyspace_name").cloned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(json!({ "value": names }))
+        Ok(json!({ "value": pluck_column(&r, "keyspace_name") }))
     })
 }
 
@@ -397,15 +457,7 @@ pub extern "C" fn scylla__tables(args: *const c_char) -> *const c_char {
             escape_string(ks)
         );
         let r = run_cql(&v, &cql)?;
-        let names: Vec<Value> = rows_of(&r)
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|row| row.get("table_name").cloned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(json!({ "value": names }))
+        Ok(json!({ "value": pluck_column(&r, "table_name") }))
     })
 }
 
@@ -436,6 +488,70 @@ pub extern "C" fn scylla__count(args: *const c_char) -> *const c_char {
             .cloned()
             .unwrap_or(json!(0));
         Ok(json!({ "value": n }))
+    })
+}
+
+/// Secondary indexes on `keyspace`.`table` (`system_schema.indexes`). Each row
+/// has `index_name`, `kind`, and an `options` map.
+#[no_mangle]
+pub extern "C" fn scylla__indexes(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let ks = opt_str(&v, "keyspace").ok_or_else(|| anyhow!("missing keyspace"))?;
+        let table = str_field(&v, "table")?;
+        let cql = format!(
+            "SELECT index_name, kind, options FROM system_schema.indexes \
+             WHERE keyspace_name = '{}' AND table_name = '{}'",
+            escape_string(ks),
+            escape_string(table)
+        );
+        let r = run_cql(&v, &cql)?;
+        Ok(json!({ "value": rows_of(&r) }))
+    })
+}
+
+/// Materialized view names in `keyspace` (`system_schema.views`).
+#[no_mangle]
+pub extern "C" fn scylla__views(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let ks = opt_str(&v, "keyspace").ok_or_else(|| anyhow!("missing keyspace"))?;
+        let cql = format!(
+            "SELECT view_name FROM system_schema.views WHERE keyspace_name = '{}'",
+            escape_string(ks)
+        );
+        let r = run_cql(&v, &cql)?;
+        Ok(json!({ "value": pluck_column(&r, "view_name") }))
+    })
+}
+
+/// User-defined type names in `keyspace` (`system_schema.types`).
+#[no_mangle]
+pub extern "C" fn scylla__types(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let ks = opt_str(&v, "keyspace").ok_or_else(|| anyhow!("missing keyspace"))?;
+        let cql = format!(
+            "SELECT type_name FROM system_schema.types WHERE keyspace_name = '{}'",
+            escape_string(ks)
+        );
+        let r = run_cql(&v, &cql)?;
+        Ok(json!({ "value": pluck_column(&r, "type_name") }))
+    })
+}
+
+/// Partition-key column names for `keyspace`.`table`, in key order.
+#[no_mangle]
+pub extern "C" fn scylla__partition_keys(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let cols = key_columns(&v, "partition_key")?;
+        Ok(json!({ "value": cols }))
+    })
+}
+
+/// Clustering column names for `keyspace`.`table`, in clustering order.
+#[no_mangle]
+pub extern "C" fn scylla__clustering_keys(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let cols = key_columns(&v, "clustering")?;
+        Ok(json!({ "value": cols }))
     })
 }
 
@@ -493,6 +609,37 @@ pub extern "C" fn scylla__drop_table(args: *const c_char) -> *const c_char {
     ffi_call(args, |v| {
         let table = str_field(&v, "table")?;
         run_cql(&v, &format!("DROP TABLE IF EXISTS {}", table))?;
+        Ok(json!({ "ok": true }))
+    })
+}
+
+/// Create a secondary index on `table`(`column`). With an optional `name` the
+/// index is named; otherwise the cluster assigns the default name. Uses
+/// `IF NOT EXISTS`.
+#[no_mangle]
+pub extern "C" fn scylla__create_index(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let table = str_field(&v, "table")?;
+        let column = str_field(&v, "column")?;
+        let cql = match opt_str(&v, "name") {
+            Some(name) => format!(
+                "CREATE INDEX IF NOT EXISTS {} ON {} ({})",
+                name, table, column
+            ),
+            None => format!("CREATE INDEX IF NOT EXISTS ON {} ({})", table, column),
+        };
+        run_cql(&v, &cql)?;
+        Ok(json!({ "ok": true }))
+    })
+}
+
+/// Drop a secondary index by `name` (`DROP INDEX IF EXISTS`). The name may be
+/// keyspace-qualified.
+#[no_mangle]
+pub extern "C" fn scylla__drop_index(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let name = str_field(&v, "name")?;
+        run_cql(&v, &format!("DROP INDEX IF EXISTS {}", name))?;
         Ok(json!({ "ok": true }))
     })
 }
@@ -752,5 +899,36 @@ mod tests {
         assert!(!valid_identifier("1col"));
         assert!(!valid_identifier("has space"));
         assert!(!valid_identifier(""));
+    }
+
+    #[test]
+    fn pluck_column_extracts_named_field() {
+        let r = json!({ "rows": [
+            { "keyspace_name": "a", "x": 1 },
+            { "keyspace_name": "b", "x": 2 },
+            { "x": 3 },
+        ]});
+        assert_eq!(
+            pluck_column(&r, "keyspace_name"),
+            vec![json!("a"), json!("b")]
+        );
+        assert_eq!(pluck_column(&r, "x"), vec![json!(1), json!(2), json!(3)]);
+        assert!(pluck_column(&json!({}), "keyspace_name").is_empty());
+    }
+
+    #[test]
+    fn sort_columns_orders_by_position() {
+        // system_schema.columns commonly returns keys out of position order.
+        let rows = json!([
+            { "column_name": "ck", "position": 0 },
+            { "column_name": "pk2", "position": 1 },
+            { "column_name": "pk1", "position": 0 },
+        ]);
+        // Stable sort by position keeps insertion order within equal positions.
+        assert_eq!(
+            sort_columns_by_position(&rows),
+            vec![json!("ck"), json!("pk1"), json!("pk2")]
+        );
+        assert!(sort_columns_by_position(&json!([])).is_empty());
     }
 }

@@ -112,10 +112,10 @@ process; the driver maintains its own per-node connection pool.
 
 | Group         | Functions                                                                     |
 | ------------- | ----------------------------------------------------------------------------- |
-| Liveness      | `version`, `ping`, `server_version`                                            |
+| Liveness      | `version`, `ping`, `server_version`, `cluster_name`, `peers`                    |
 | Query         | `query`, `query_row`, `query_value`, `execute`, `batch`, `raw`                  |
-| Introspection | `keyspaces`, `tables`, `columns`, `count`                                      |
-| DDL           | `create_keyspace`, `drop_keyspace`, `create_table`, `drop_table`, `truncate`   |
+| Introspection | `keyspaces`, `tables`, `columns`, `count`, `indexes`, `views`, `types`, `partition_keys`, `clustering_keys` |
+| DDL           | `create_keyspace`, `drop_keyspace`, `create_table`, `drop_table`, `create_index`, `drop_index`, `truncate` |
 | Pure helpers  | `escape`, `quote_literal`, `quote_ident`, `valid_identifier`, `format_value`, `format_in_list`, `contact_points` |
 
 ```perl

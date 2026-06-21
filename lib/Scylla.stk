@@ -55,6 +55,18 @@ fn Scylla::server_version (%opts) {
     Scylla::_decode("server_version", scylla__server_version(to_json($r)))->{value}
 }
 
+## Cluster name as configured on the coordinator (`system.local`).
+fn Scylla::cluster_name (%opts) {
+    val $r = Scylla::_req({}, \%opts)
+    Scylla::_decode("cluster_name", scylla__cluster_name(to_json($r)))->{value}
+}
+
+## Peer node addresses known to the coordinator (`system.peers`).
+fn Scylla::peers (%opts) {
+    val $r = Scylla::_req({}, \%opts)
+    @{ Scylla::_decode("peers", scylla__peers(to_json($r)))->{value} }
+}
+
 # ── query ─────────────────────────────────────────────────────────────
 
 ## Run a SELECT; returns the array of row objects.
@@ -115,6 +127,36 @@ fn Scylla::count ($table, %opts) {
     Scylla::_decode("count", scylla__count(to_json($r)))->{value}
 }
 
+## Secondary index descriptors on $keyspace.$table (index_name, kind, options).
+fn Scylla::indexes ($keyspace, $table, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace, table => $table }, \%opts)
+    @{ Scylla::_decode("indexes", scylla__indexes(to_json($r)))->{value} }
+}
+
+## Array of materialized-view names in $keyspace.
+fn Scylla::views ($keyspace, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace }, \%opts)
+    @{ Scylla::_decode("views", scylla__views(to_json($r)))->{value} }
+}
+
+## Array of user-defined type names in $keyspace.
+fn Scylla::types ($keyspace, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace }, \%opts)
+    @{ Scylla::_decode("types", scylla__types(to_json($r)))->{value} }
+}
+
+## Partition-key column names of $keyspace.$table, in key order.
+fn Scylla::partition_keys ($keyspace, $table, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace, table => $table }, \%opts)
+    @{ Scylla::_decode("partition_keys", scylla__partition_keys(to_json($r)))->{value} }
+}
+
+## Clustering column names of $keyspace.$table, in clustering order.
+fn Scylla::clustering_keys ($keyspace, $table, %opts) {
+    val $r = Scylla::_req({ keyspace => $keyspace, table => $table }, \%opts)
+    @{ Scylla::_decode("clustering_keys", scylla__clustering_keys(to_json($r)))->{value} }
+}
+
 # ── DDL helpers ───────────────────────────────────────────────────────
 
 ## CREATE KEYSPACE IF NOT EXISTS $name. %opts{replication} is the CQL
@@ -149,6 +191,19 @@ fn Scylla::create_table ($name, %opts) {
 fn Scylla::drop_table ($table, %opts) {
     val $r = Scylla::_req({ table => $table }, \%opts)
     Scylla::_decode("drop_table", scylla__drop_table(to_json($r)))->{ok}
+}
+
+## CREATE INDEX IF NOT EXISTS on $table($column). %opts{name} names the index;
+## omit it to let the cluster assign the default name.
+fn Scylla::create_index ($table, $column, %opts) {
+    val $r = Scylla::_req({ table => $table, column => $column, name => $opts{name} }, \%opts)
+    Scylla::_decode("create_index", scylla__create_index(to_json($r)))->{ok}
+}
+
+## DROP INDEX IF EXISTS $name (may be keyspace-qualified).
+fn Scylla::drop_index ($name, %opts) {
+    val $r = Scylla::_req({ name => $name }, \%opts)
+    Scylla::_decode("drop_index", scylla__drop_index(to_json($r)))->{ok}
 }
 
 ## TRUNCATE $table.

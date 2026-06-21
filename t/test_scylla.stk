@@ -55,6 +55,31 @@ if ($alive) {
     val @cols = Scylla::columns($ks, "users", %conn)
     assert_ok scalar(@cols) >= 2, "columns lists at least 2 columns"
 
+    # 8. partition key introspection (id is the sole partition key)
+    val @pk = Scylla::partition_keys($ks, "users", %conn)
+    assert_eq scalar(@pk), 1, "partition_keys returns one key"
+    assert_eq $pk[0], "id", "partition_keys names the primary key column"
+
+    # 9. clustering keys (none on this table)
+    val @ck = Scylla::clustering_keys($ks, "users", %conn)
+    assert_eq scalar(@ck), 0, "clustering_keys empty for single-key table"
+
+    # 10. secondary index lifecycle
+    Scylla::create_index("$ks.users", "name", name => "users_name_idx", %conn)
+    assert_ok grep { $_->{index_name} eq "users_name_idx" } Scylla::indexes($ks, "users", %conn),
+        "create_index registers the index"
+    Scylla::drop_index("$ks.users_name_idx", %conn)
+    assert_ok !(grep { $_->{index_name} eq "users_name_idx" } Scylla::indexes($ks, "users", %conn)),
+        "drop_index removes the index"
+
+    # 11. materialized views + UDTs (none defined → empty)
+    assert_eq scalar(Scylla::views($ks, %conn)), 0, "views empty on fresh keyspace"
+    assert_eq scalar(Scylla::types($ks, %conn)), 0, "types empty on fresh keyspace"
+
+    # 12. cluster metadata
+    assert_ok length(Scylla::cluster_name(%conn)) > 0, "cluster_name non-empty"
+    Scylla::peers(%conn)   # may be empty on a single node; just exercise the path
+
     # cleanup
     Scylla::drop_keyspace($ks, %conn)
     assert_ok !(grep { $_ eq $ks } Scylla::keyspaces(%conn)), "keyspace dropped"
