@@ -113,7 +113,7 @@ process; the driver maintains its own per-node connection pool.
 | Group         | Functions                                                                     |
 | ------------- | ----------------------------------------------------------------------------- |
 | Liveness      | `version`, `ping`, `server_version`                                            |
-| Query         | `query`, `query_row`, `query_value`, `execute`, `raw`                          |
+| Query         | `query`, `query_row`, `query_value`, `execute`, `batch`, `raw`                  |
 | Introspection | `keyspaces`, `tables`, `columns`, `count`                                      |
 | DDL           | `create_keyspace`, `drop_keyspace`, `create_table`, `drop_table`, `truncate`   |
 | Pure helpers  | `escape`, `quote_literal`, `quote_ident`, `valid_identifier`, `format_value`, `format_in_list`, `contact_points` |

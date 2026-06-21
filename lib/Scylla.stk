@@ -81,6 +81,14 @@ fn Scylla::execute ($cql, %opts) {
     Scylla::_decode("execute", scylla__execute(to_json($r)))->{ok}
 }
 
+## Apply an arrayref of $statements as one CQL batch. %opts{unlogged} selects an
+## UNLOGGED batch. Atomic within a single partition.
+fn Scylla::batch ($statements, %opts) {
+    val $list = ref($statements) eq "ARRAY" ? $statements : [$statements]
+    val $r = Scylla::_req({ statements => $list, unlogged => ($opts{unlogged} // 0) }, \%opts)
+    Scylla::_decode("batch", scylla__batch(to_json($r)))->{count}
+}
+
 # ── schema introspection ──────────────────────────────────────────────
 
 ## Array of keyspace names.

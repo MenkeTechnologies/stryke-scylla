@@ -96,7 +96,7 @@ val @rows = Scylla::query("SELECT name FROM app.users", %conn)</pre>
         <h2>API surface</h2>
         <table class="example-tbl">
           <tr><td>Liveness</td><td><code>version</code>, <code>ping</code>, <code>server_version</code></td></tr>
-          <tr><td>Query</td><td><code>query</code>, <code>query_row</code>, <code>query_value</code>, <code>execute</code>, <code>raw</code></td></tr>
+          <tr><td>Query</td><td><code>query</code>, <code>query_row</code>, <code>query_value</code>, <code>execute</code>, <code>batch</code>, <code>raw</code></td></tr>
           <tr><td>Introspection</td><td><code>keyspaces</code>, <code>tables</code>, <code>columns</code>, <code>count</code></td></tr>
           <tr><td>DDL</td><td><code>create_keyspace</code>, <code>drop_keyspace</code>, <code>create_table</code>, <code>drop_table</code>, <code>truncate</code></td></tr>
           <tr><td>Pure helpers</td><td><code>escape</code>, <code>quote_literal</code>, <code>quote_ident</code>, <code>valid_identifier</code>, <code>format_value</code>, <code>format_in_list</code>, <code>contact_points</code></td></tr>

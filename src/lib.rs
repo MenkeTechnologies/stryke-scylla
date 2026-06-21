@@ -347,6 +347,29 @@ pub extern "C" fn scylla__execute(args: *const c_char) -> *const c_char {
     })
 }
 
+/// Apply multiple statements as one CQL batch. `statements` is an array of CQL
+/// strings; `unlogged` (default false) selects an UNLOGGED batch. Atomic within
+/// a single partition; cross-partition batches are allowed but not atomic.
+#[no_mangle]
+pub extern "C" fn scylla__batch(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let stmts: Vec<String> = v
+            .get("statements")
+            .and_then(|x| x.as_array())
+            .ok_or_else(|| anyhow!("missing statements array"))?
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect();
+        if stmts.is_empty() {
+            return Err(anyhow!("statements array is empty"));
+        }
+        let unlogged = v.get("unlogged").and_then(|x| x.as_bool()).unwrap_or(false);
+        let cql = build_batch_cql(&stmts, unlogged);
+        run_cql(&v, &cql)?;
+        Ok(json!({ "ok": true, "count": stmts.len() }))
+    })
+}
+
 // ── schema introspection ────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -616,6 +639,19 @@ fn valid_identifier(s: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Wrap statements in a textual CQL batch (`BEGIN [UNLOGGED] BATCH … APPLY
+/// BATCH;`). Each statement is trimmed and given exactly one trailing `;`.
+fn build_batch_cql(stmts: &[String], unlogged: bool) -> String {
+    let kind = if unlogged { "UNLOGGED BATCH" } else { "BATCH" };
+    let mut out = format!("BEGIN {kind}\n");
+    for s in stmts {
+        out.push_str(s.trim().trim_end_matches(';').trim_end());
+        out.push_str(";\n");
+    }
+    out.push_str("APPLY BATCH;");
+    out
+}
+
 // ── unit tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -691,6 +727,23 @@ mod tests {
     fn format_in_list_and_empty_sentinel() {
         assert_eq!(format_in_list(&[json!(1), json!("a")]), "(1, 'a')");
         assert_eq!(format_in_list(&[]), "(NULL)");
+    }
+
+    #[test]
+    fn build_batch_cql_wraps_statements() {
+        let s = build_batch_cql(
+            &[
+                "INSERT INTO a (x) VALUES (1)".into(),
+                "UPDATE a SET y=2 WHERE x=1;".into(),
+            ],
+            false,
+        );
+        assert!(s.starts_with("BEGIN BATCH\n"));
+        assert!(s.contains("INSERT INTO a (x) VALUES (1);"));
+        assert!(s.contains("UPDATE a SET y=2 WHERE x=1;"));
+        assert!(!s.contains(";;"));
+        assert!(s.ends_with("APPLY BATCH;"));
+        assert!(build_batch_cql(&["x".into()], true).contains("BEGIN UNLOGGED BATCH"));
     }
 
     #[test]
