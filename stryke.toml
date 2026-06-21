@@ -1,6 +1,6 @@
 [package]
 name = "stryke-scylla"
-version = "0.1.0"
+version = "0.2.0"
 description = "ScyllaDB / Cassandra client for stryke. cdylib loaded in-process — CQL via the pure-Rust scylla driver on an embedded tokio runtime; Session cached per (nodes, auth, keyspace)."
 authors = ["MenkeTechnologies"]
 license = "MIT"
@@ -31,6 +31,10 @@ exports = [
     "scylla__escape_string",
     "scylla__quote_identifier",
     "scylla__contact_points",
+    "scylla__quote_literal",
+    "scylla__format_value",
+    "scylla__format_in_list",
+    "scylla__valid_identifier",
 ]
 
 [scripts]

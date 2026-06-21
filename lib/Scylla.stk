@@ -173,3 +173,24 @@ fn Scylla::contact_points (%opts) {
     val $r = Scylla::_req({}, \%opts)
     @{ Scylla::_decode("contact_points", scylla__contact_points(to_json($r)))->{value} }
 }
+
+## Wrap $value as a single-quoted CQL literal (escaping embedded quotes).
+fn Scylla::quote_literal ($value) {
+    Scylla::_decode("quote_literal", scylla__quote_literal(to_json({ value => $value })))->{value}
+}
+
+## Format a $value as a CQL literal (string/number/bool/null/list).
+fn Scylla::format_value ($value) {
+    Scylla::_decode("format_value", scylla__format_value(to_json({ value => $value })))->{value}
+}
+
+## Render an arrayref of $values into a CQL `IN (...)` list.
+fn Scylla::format_in_list ($values) {
+    val $list = ref($values) eq "ARRAY" ? $values : [$values]
+    Scylla::_decode("format_in_list", scylla__format_in_list(to_json({ values => $list })))->{value}
+}
+
+## True when $value is a valid unquoted CQL identifier.
+fn Scylla::valid_identifier ($value) {
+    Scylla::_decode("valid_identifier", scylla__valid_identifier(to_json({ value => $value })))->{valid}
+}

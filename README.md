@@ -116,7 +116,7 @@ process; the driver maintains its own per-node connection pool.
 | Query         | `query`, `query_row`, `query_value`, `execute`, `raw`                          |
 | Introspection | `keyspaces`, `tables`, `columns`, `count`                                      |
 | DDL           | `create_keyspace`, `drop_keyspace`, `create_table`, `drop_table`, `truncate`   |
-| Pure helpers  | `escape`, `quote_ident`, `contact_points`                                      |
+| Pure helpers  | `escape`, `quote_literal`, `quote_ident`, `valid_identifier`, `format_value`, `format_in_list`, `contact_points` |
 
 ```perl
 # escape untrusted input before interpolating

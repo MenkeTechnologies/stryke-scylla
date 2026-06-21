@@ -528,6 +528,45 @@ pub extern "C" fn scylla__contact_points(args: *const c_char) -> *const c_char {
     })
 }
 
+/// Wrap a string as a single-quoted CQL literal.
+#[no_mangle]
+pub extern "C" fn scylla__quote_literal(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let s = str_field(&v, "value")?;
+        Ok(json!({ "value": quote_literal(s) }))
+    })
+}
+
+/// Format a JSON value as a CQL literal (string/number/bool/null/list).
+#[no_mangle]
+pub extern "C" fn scylla__format_value(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let val = v.get("value").ok_or_else(|| anyhow!("missing value"))?;
+        Ok(json!({ "value": format_value(val) }))
+    })
+}
+
+/// Render an array of values into a CQL `IN (...)` list.
+#[no_mangle]
+pub extern "C" fn scylla__format_in_list(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let vals = v
+            .get("values")
+            .and_then(|x| x.as_array())
+            .ok_or_else(|| anyhow!("missing values array"))?;
+        Ok(json!({ "value": format_in_list(vals) }))
+    })
+}
+
+/// True when a string is a valid unquoted CQL identifier.
+#[no_mangle]
+pub extern "C" fn scylla__valid_identifier(args: *const c_char) -> *const c_char {
+    ffi_call(args, |v| {
+        let s = str_field(&v, "value")?;
+        Ok(json!({ "valid": valid_identifier(s) }))
+    })
+}
+
 // ── shared pure logic (unit-tested) ─────────────────────────────────────────
 
 fn escape_string(s: &str) -> String {
@@ -536,6 +575,45 @@ fn escape_string(s: &str) -> String {
 
 fn quote_identifier(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
+}
+
+/// Wrap a string as a single-quoted CQL literal (escaping embedded quotes).
+fn quote_literal(s: &str) -> String {
+    format!("'{}'", escape_string(s))
+}
+
+/// Format a JSON value as a CQL literal: string→`'...'`, number→as-is,
+/// bool→`true`/`false`, null→`NULL`, array→CQL list `[...]`.
+fn format_value(v: &Value) -> String {
+    match v {
+        Value::Null => "NULL".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => quote_literal(s),
+        Value::Array(a) => format!(
+            "[{}]",
+            a.iter().map(format_value).collect::<Vec<_>>().join(", ")
+        ),
+        Value::Object(_) => quote_literal(&v.to_string()),
+    }
+}
+
+/// Render values into an `IN (...)` list. Empty → `(NULL)` (matches nothing).
+fn format_in_list(vals: &[Value]) -> String {
+    if vals.is_empty() {
+        return "(NULL)".to_string();
+    }
+    format!(
+        "({})",
+        vals.iter().map(format_value).collect::<Vec<_>>().join(", ")
+    )
+}
+
+/// A CQL identifier is safe unquoted when it matches `[A-Za-z][A-Za-z0-9_]*`.
+fn valid_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // ── unit tests ──────────────────────────────────────────────────────────────
@@ -592,5 +670,34 @@ mod tests {
             cql_to_json(&CqlValue::List(vec![CqlValue::Int(1), CqlValue::Int(2)])),
             json!([1, 2])
         );
+    }
+
+    #[test]
+    fn quote_literal_wraps_and_escapes() {
+        assert_eq!(quote_literal("O'Brien"), "'O''Brien'");
+        assert_eq!(quote_literal("plain"), "'plain'");
+    }
+
+    #[test]
+    fn format_value_by_type() {
+        assert_eq!(format_value(&json!(7)), "7");
+        assert_eq!(format_value(&json!(true)), "true");
+        assert_eq!(format_value(&Value::Null), "NULL");
+        assert_eq!(format_value(&json!("a'b")), "'a''b'");
+        assert_eq!(format_value(&json!([1, "x"])), "[1, 'x']");
+    }
+
+    #[test]
+    fn format_in_list_and_empty_sentinel() {
+        assert_eq!(format_in_list(&[json!(1), json!("a")]), "(1, 'a')");
+        assert_eq!(format_in_list(&[]), "(NULL)");
+    }
+
+    #[test]
+    fn valid_identifier_rules() {
+        assert!(valid_identifier("col_1"));
+        assert!(!valid_identifier("1col"));
+        assert!(!valid_identifier("has space"));
+        assert!(!valid_identifier(""));
     }
 }
