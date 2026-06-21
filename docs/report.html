@@ -101,7 +101,12 @@
         <div class="stat-card"><div class="stat-val cyan">opt-in</div><div class="stat-label">Tier</div></div>
         <div class="stat-card"><div class="stat-val">cdylib</div><div class="stat-label">Load model (dlopen)</div></div>
         <div class="stat-card"><div class="stat-val green">CQL</div><div class="stat-label">Driver (scylla, rustls)</div></div>
+        <div class="stat-card"><div class="stat-val">34</div><div class="stat-label">Public Scylla:: functions</div></div>
+        <div class="stat-card"><div class="stat-val cyan">34</div><div class="stat-label">scylla__* FFI exports</div></div>
+        <div class="stat-card"><div class="stat-val green">14</div><div class="stat-label">In-crate unit tests</div></div>
+        <div class="stat-card"><div class="stat-val">MIT</div><div class="stat-label">License</div></div>
       </div>
+      <p>Each public <code>Scylla::*</code> wrapper in <code>lib/Scylla.stk</code> maps to one <code>#[no_mangle] extern "C" fn scylla__*</code> export in <code>src/lib.rs</code>, registered in <code>stryke.toml</code> under <code>[ffi].exports</code> &mdash; the surface test pins all 34 wrappers, and the export list, the extern functions, and the wrapper set are kept one-to-one. The 14 unit tests cover the pure logic (escaping, identifier quoting, contact-point normalization, batch construction, <code>CqlValue</code>&rarr;JSON, column-position sorting) and run with no cluster.</p>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">~</span>TRANSPORT</h2>
@@ -109,15 +114,47 @@
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">~</span>SYNC OVER ASYNC</h2>
-      <p>The driver is async. Rather than expose futures across the FFI boundary, the cdylib owns a single embedded tokio runtime (<code>OnceCell&lt;Runtime&gt;</code>) and <code>block_on</code>s every driver call, so the stryke-facing API stays synchronous like the other connectors. A <code>Session</code> is cached per <code>(nodes, auth, keyspace)</code> in a <code>OnceCell&lt;Mutex&lt;HashMap&gt;&gt;</code>.</p>
+      <p>The driver is async. Rather than expose futures across the FFI boundary, the cdylib owns a single embedded multi-thread tokio runtime (<code>OnceCell&lt;Runtime&gt;</code>, 2 worker threads, <code>enable_all</code>) and <code>block_on</code>s every driver call, so the stryke-facing API stays synchronous like the other connectors.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">~</span>SESSION CACHE + CONNECTION RESOLUTION</h2>
+      <p>A <code>Session</code> is cached in a <code>OnceCell&lt;Mutex&lt;HashMap&lt;ConnKey, Arc&lt;Session&gt;&gt;&gt;&gt;</code> keyed by <code>ConnKey { nodes, username, password, keyspace }</code> &mdash; calls sharing those four values reuse the same pooled session; differing on any field opens and caches a distinct one. The connection-free <code>conn_from_opts</code> resolves the opts dict to a <code>ConnKey</code>: a <code>nodes</code> array wins; otherwise <code>node</code>/<code>host</code> (combined with <code>port</code>) is used; an empty result defaults to <code>127.0.0.1:9042</code>. A contact point without a <code>:port</code> gets the default CQL port appended (<code>normalize_node</code>). The <code>Scylla.stk</code> wrapper fills <code>nodes</code> from <code>$SCYLLA_NODES</code> (comma-split) when the caller passes no node. Auth is applied only when a username or password is non-empty; a non-empty keyspace is <code>USE</code>d on the session right after connect.</p>
+      <table class="arch-table">
+        <thead><tr><th>opts key</th><th>Resolution</th></tr></thead>
+        <tbody>
+          <tr><td><code>nodes</code></td><td>Array of contact points; each normalized to <code>host:port</code>. Overrides <code>node</code>/<code>host</code>.</td></tr>
+          <tr><td><code>node</code> / <code>host</code></td><td>Single contact point; <code>port</code> appended when it carries no <code>:port</code>.</td></tr>
+          <tr><td><code>port</code></td><td>Default <code>9042</code>; combined with <code>node</code>/<code>host</code>.</td></tr>
+          <tr><td><code>username</code> / <code>password</code></td><td>PasswordAuthenticator credentials; applied only when non-empty.</td></tr>
+          <tr><td><code>keyspace</code></td><td><code>use_keyspace</code> after connect; part of the cache key.</td></tr>
+        </tbody>
+      </table>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">$</span>ROWS TO JSON</h2>
-      <p>Result rows are read generically: each <code>CqlValue</code> maps to its natural JSON form &mdash; integers, text, booleans, and lists/sets/maps &mdash; with a debug-string fallback for exotic types so the converter never fails. Rows come back as objects keyed by column name, taken from the result's column specs.</p>
+      <p>SELECT-style results become an array of row objects keyed by column name (taken from the result's column specs); statements with no result set (DDL/DML) return <code>{ "ok": true }</code>, which the row-returning wrappers surface as an empty array. Each <code>CqlValue</code> is mapped by <code>cql_to_json</code> to its natural JSON form, with a debug-string fallback for exotic types so the converter never fails.</p>
+      <table class="arch-table">
+        <thead><tr><th>CqlValue</th><th>JSON form</th></tr></thead>
+        <tbody>
+          <tr><td><code>Int</code>, <code>BigInt</code>, <code>SmallInt</code>, <code>TinyInt</code></td><td>JSON number</td></tr>
+          <tr><td><code>Float</code>, <code>Double</code></td><td>JSON number</td></tr>
+          <tr><td><code>Text</code>, <code>Ascii</code></td><td>JSON string</td></tr>
+          <tr><td><code>Boolean</code></td><td>JSON bool</td></tr>
+          <tr><td><code>Uuid</code></td><td>JSON string (the UUID's string form)</td></tr>
+          <tr><td><code>List</code>, <code>Set</code></td><td>JSON array (recursively converted)</td></tr>
+          <tr><td><code>Map</code></td><td>JSON array of <code>[key, value]</code> pairs</td></tr>
+          <tr><td><code>Empty</code> / NULL column</td><td>JSON null</td></tr>
+          <tr><td>anything else</td><td><code>format!("{:?}", …)</code> debug string</td></tr>
+        </tbody>
+      </table>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">&amp;</span>FFI CONTRACT + SAFETY</h2>
-      <p>Each <code>#[no_mangle] extern "C" fn scylla__*</code> is a JSON-string-in / JSON-string-out wrapper; handlers run inside <code>catch_unwind</code> so a panic becomes an <code>{ "error": … }</code> result. Queries are unparameterized CQL &mdash; interpolate untrusted values through <code>escape</code>, which doubles the single quote per the CQL grammar. The escaping and contact-point helpers are unit-tested in-crate and validate in CI with no cluster.</p>
+      <p>Each <code>#[no_mangle] extern "C" fn scylla__*</code> is a JSON-string-in / JSON-string-out wrapper. <code>ffi_call</code> parses the argument C-string into a <code>serde_json::Value</code> (null on parse failure), runs the handler inside <code>catch_unwind</code> (<code>AssertUnwindSafe</code>), serializes the result, and hands back a heap <code>CString</code> that stryke later frees via <code>stryke_free_cstring</code>. A handler error becomes <code>{ "error": … }</code> and a panic becomes <code>{ "error": "stryke-scylla handler panicked" }</code>; the <code>Scylla.stk</code> <code>_decode</code> step turns any <code>error</code> field into a stryke <code>die</code>. Queries are unparameterized CQL &mdash; interpolate untrusted values through <code>escape</code> (doubles the single quote per the CQL grammar) or the other pure helpers, which are unit-tested in-crate and validate in CI with no cluster.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">+</span>BATCH CONSTRUCTION</h2>
+      <p><code>batch</code> takes a <code>statements</code> array (errors when missing or empty) and an <code>unlogged</code> flag (default false). <code>build_batch_cql</code> wraps them in a textual <code>BEGIN [UNLOGGED] BATCH … APPLY BATCH;</code> block, trimming each statement and giving it exactly one trailing <code>;</code> (so no <code>;;</code>), then runs it as one statement and returns <code>{ "ok": true, "count": n }</code>. Atomic within a single partition; cross-partition batches are allowed but not atomic.</p>
       <table class="arch-table">
         <thead><tr><th>Group</th><th>Functions</th></tr></thead>
         <tbody>
@@ -131,7 +168,22 @@
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">/</span>DEPENDENCIES</h2>
-      <p><code>scylla</code> (CQL binary protocol, rustls TLS), <code>tokio</code> (embedded runtime), <code>serde_json</code> for the FFI payloads. Pure-Rust throughout &mdash; no native client library.</p>
+      <p><code>scylla</code> (CQL binary protocol, rustls TLS), <code>tokio</code> (embedded runtime), <code>serde_json</code> for the FFI payloads, plus <code>anyhow</code> (error type), <code>once_cell</code> (runtime + session statics), and <code>parking_lot</code> (the session-cache mutex). Pure-Rust throughout &mdash; no native client library, so the cdylib builds and vendors cleanly.</p>
+
+      <hr class="section-rule">
+      <h2 class="tutorial-title"><span class="step-hash">%</span>BUILD + TEST</h2>
+      <p>The <code>Makefile</code> wraps the standard flow: <code>make debug</code> (<code>cargo build</code>), <code>make test</code> (<code>cargo test</code> then <code>s test t/</code>), <code>make install</code> (<code>s pkg install -g .</code>). <code>cargo test</code> runs the 14 in-crate unit tests with no cluster. On the stryke side, <code>t/test_stryke_scylla_surface.stk</code> asserts all 34 public wrappers resolve and exercises the connection-free helpers; <code>t/test_scylla.stk</code> drives a full keyspace &rarr; table &rarr; insert &rarr; count &rarr; query &rarr; index &rarr; drop lifecycle against a live cluster and short-circuits when <code>ping</code> fails, so a cluster-less CI run still passes the connection-free asserts.</p>
+      <table class="arch-table">
+        <thead><tr><th>Tested without a cluster</th><th>What it pins</th></tr></thead>
+        <tbody>
+          <tr><td><code>escape_string</code> / <code>quote_literal</code> / <code>quote_identifier</code></td><td>CQL quote-doubling and identifier quoting</td></tr>
+          <tr><td><code>normalize_node</code> / <code>conn_from_opts</code> / <code>contact_points</code></td><td>Default-port append, nodes-array normalization, localhost fallback</td></tr>
+          <tr><td><code>cql_to_json</code></td><td>Scalar and collection <code>CqlValue</code>&rarr;JSON mapping</td></tr>
+          <tr><td><code>format_value</code> / <code>format_in_list</code></td><td>Typed CQL literals and the <code>(NULL)</code> empty-list sentinel</td></tr>
+          <tr><td><code>build_batch_cql</code></td><td>BATCH wrapping, single trailing <code>;</code>, UNLOGGED variant</td></tr>
+          <tr><td><code>valid_identifier</code> / <code>pluck_column</code> / <code>sort_columns_by_position</code></td><td>Identifier rules, column extraction, key-order sorting</td></tr>
+        </tbody>
+      </table>
 
       <hr class="section-rule">
       <h2 class="tutorial-title"><span class="step-hash">#</span>PROJECT METADATA</h2>
