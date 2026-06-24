@@ -22,6 +22,8 @@ Cassandra cluster over the native CQL binary protocol. Opt-in package tier.
 
 ### [`strykelang`](https://github.com/MenkeTechnologies/strykelang) &middot; [`MenkeTechnologiesMeta`](https://github.com/MenkeTechnologies/MenkeTechnologiesMeta) · [`stryke-clickhouse`](https://github.com/MenkeTechnologies/stryke-clickhouse) · [`stryke-mongo`](https://github.com/MenkeTechnologies/stryke-mongo) · [`stryke-redis`](https://github.com/MenkeTechnologies/stryke-redis)
 
+### [`Read the Docs`](https://menketechnologies.github.io/stryke-scylla/) &middot; [`Engineering Report`](https://menketechnologies.github.io/stryke-scylla/report.html)
+
 ---
 
 ## Table of Contents
