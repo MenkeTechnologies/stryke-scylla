@@ -1,6 +1,6 @@
 [package]
 name = "stryke-scylla"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 description = "ScyllaDB / Cassandra cdylib for the stryke `scylla` package — dlopened in-process via stryke's FFI bridge"
 authors = ["MenkeTechnologies <linux.dev25@gmail.com>"]
